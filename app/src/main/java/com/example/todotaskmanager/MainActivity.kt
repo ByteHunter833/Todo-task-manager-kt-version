@@ -18,18 +18,17 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import com.example.todotaskmanager.ui.theme.TodoTaskManagerTheme
+import kotlinx.coroutines.launch
 import kotlin.random.Random
-
-data class Task(
-    val title: String,
-    val id: Int,
-    val isDone: Boolean = false
-)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        val db = TaskDatabase.getDatabase(this)
+        val taskDao = db.taskDao()
+
         setContent {
             TodoTaskManagerTheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
@@ -37,6 +36,11 @@ class MainActivity : ComponentActivity() {
                     var tasks by remember { mutableStateOf(listOf<Task>()) }
                     var taskText by remember { mutableStateOf("") }
                     var editingTaskId by remember { mutableStateOf<Int?>(null) }
+                    val scope = rememberCoroutineScope()
+
+                    LaunchedEffect(Unit) {
+                        tasks = taskDao.getAllTasks()
+                    }
 
                     Column(
                         modifier = Modifier
@@ -70,10 +74,9 @@ class MainActivity : ComponentActivity() {
                                     elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
                                 ) {
                                     Row(
-
-                                        modifier = Modifier.fillMaxWidth().padding(
-                                            horizontal = 12.dp
-                                        ),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 8.dp, horizontal = 12.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Text(
@@ -90,19 +93,21 @@ class MainActivity : ComponentActivity() {
                                         Checkbox(
                                             checked = task.isDone,
                                             onCheckedChange = {
-                                                tasks = tasks.map {
-                                                    if (it == task) {
-                                                        it.copy(isDone = !it.isDone)
-                                                    } else {
-                                                        it
-                                                    }
+                                                val updatedTask = task.copy(isDone = !task.isDone)
+
+                                                scope.launch {
+                                                    taskDao.updateTask(updatedTask)
+                                                    tasks = taskDao.getAllTasks()
                                                 }
                                             }
                                         )
 
                                         IconButton(
                                             onClick = {
-                                                tasks = tasks.filter { it != task }
+                                                scope.launch {
+                                                    taskDao.deleteTask(task)
+                                                    tasks = taskDao.getAllTasks()
+                                                }
                                             }
                                         ) {
                                             Icon(
@@ -111,7 +116,7 @@ class MainActivity : ComponentActivity() {
                                                 tint = MaterialTheme.colorScheme.error
                                             )
                                         }
-                                        //Edit button
+
                                         IconButton(
                                             onClick = {
                                                 taskText = task.title
@@ -121,7 +126,7 @@ class MainActivity : ComponentActivity() {
                                             Icon(
                                                 imageVector = Icons.Default.Create,
                                                 contentDescription = "Edit",
-                                                tint = MaterialTheme.colorScheme.surfaceTint
+                                                tint = MaterialTheme.colorScheme.primary
                                             )
                                         }
                                     }
@@ -133,26 +138,34 @@ class MainActivity : ComponentActivity() {
 
                         Button(
                             onClick = {
-                                if(editingTaskId!=null){
-                                    tasks = tasks.map {
-                                        if (it.id == editingTaskId) {
-                                            it.copy(title = taskText.trim())
-
+                                if (taskText.isNotBlank()) {
+                                    scope.launch {
+                                        if (editingTaskId != null) {
+                                            val oldTask = tasks.find { it.id == editingTaskId }
+                                            if (oldTask != null) {
+                                                val updatedTask = oldTask.copy(
+                                                    title = taskText.trim()
+                                                )
+                                                taskDao.updateTask(updatedTask)
+                                            }
+                                            editingTaskId = null
                                         } else {
-                                            it
+                                            val newTask = Task(
+                                                id = randomId(),
+                                                title = taskText.trim(),
+                                                isDone = false
+                                            )
+                                            taskDao.createTask(newTask)
                                         }
+
+                                        tasks = taskDao.getAllTasks()
+                                        taskText = ""
                                     }
-                                    taskText = ""
-                                }else{
-                                    val task = Task(title = taskText, isDone = false, id = randomId())
-                                    tasks += task
-                                    taskText = ""
-                                    editingTaskId = null
                                 }
                             },
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text(if(editingTaskId !=null) "Update Task" else "Add Task")
+                            Text(if (editingTaskId != null) "Update Task" else "Add Task")
                         }
                     }
                 }
@@ -160,6 +173,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
-fun randomId() : Int{
-    return Random.nextInt()
+
+fun randomId(): Int {
+    return Random.nextInt(1, 1000000)
 }
