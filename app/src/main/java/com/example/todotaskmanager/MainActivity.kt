@@ -4,8 +4,8 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.viewModels
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -13,6 +13,7 @@ import androidx.compose.material.icons.filled.Create
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -25,37 +26,41 @@ import com.airbnb.lottie.compose.LottieCompositionSpec
 import com.airbnb.lottie.compose.LottieConstants
 import com.airbnb.lottie.compose.animateLottieCompositionAsState
 import com.airbnb.lottie.compose.rememberLottieComposition
+import com.example.todotaskmanager.database.TaskDatabase
+import com.example.todotaskmanager.model.Task
 import com.example.todotaskmanager.ui.theme.TodoTaskManagerTheme
-import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
+
+    private val database by lazy { TaskDatabase.getDatabase(this) }
+
+    private val viewModel: TaskViewModel by viewModels {
+        TaskViewModelFactory(database.taskDao())
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        val db = TaskDatabase.getDatabase(this)
-        val taskDao = db.taskDao()
-
         setContent {
             TodoTaskManagerTheme {
-                Scaffold(containerColor = Color(0xffffffff),modifier = Modifier.fillMaxSize()) { innerPadding ->
+                val tasks by viewModel.tasks.collectAsState(initial = emptyList())
+                var taskText by remember { mutableStateOf("") }
+                var editingTaskId by remember { mutableStateOf<Int?>(null) }
 
-                    var tasks by remember { mutableStateOf(listOf<Task>()) }
-                    var taskText by remember { mutableStateOf("") }
-                    var editingTaskId by remember { mutableStateOf<Int?>(null) }
-                    val scope = rememberCoroutineScope()
-                    val composition by rememberLottieComposition(
-                        LottieCompositionSpec.RawRes(R.raw.search_loop)
-                    )
+                val composition by rememberLottieComposition(
+                    LottieCompositionSpec.RawRes(R.raw.search_loop)
+                )
 
-                    val progress by animateLottieCompositionAsState(
-                        composition,
-                        iterations = LottieConstants.IterateForever
-                    )
-                    LaunchedEffect(Unit) {
-                        tasks = taskDao.getAllTasks()
-                    }
+                val progress by animateLottieCompositionAsState(
+                    composition = composition,
+                    iterations = LottieConstants.IterateForever
+                )
+
+                Scaffold(
+                    containerColor = Color.White,
+                    modifier = Modifier.fillMaxSize()
+                ) { innerPadding ->
 
                     Column(
                         modifier = Modifier
@@ -64,12 +69,16 @@ class MainActivity : ComponentActivity() {
                             .padding(16.dp)
                     ) {
                         TaskHeader(tasks)
+
                         Spacer(modifier = Modifier.height(16.dp))
-                        Spacer(modifier = Modifier.height(16.dp))
+
                         TaskInput(
                             taskText = taskText,
                             onValueChange = { taskText = it }
                         )
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
                         LazyColumn(
                             modifier = Modifier.weight(1f),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -78,37 +87,23 @@ class MainActivity : ComponentActivity() {
                                 item {
                                     EmptyState(
                                         composition = composition,
-                                        progress = progress,
+                                        progress = progress
                                     )
                                 }
                             } else {
                                 items(tasks) { task ->
-                                    Spacer(
-                                        modifier = Modifier.height(16.dp)
-                                    )
                                     TaskItem(
                                         task = task,
                                         onToggle = {
-                                            val updatedTask = task.copy(
-                                                isDone = !task.isDone,
-                                            )
-                                            scope.launch {
-                                                taskDao.updateTask(updatedTask)
-                                                tasks = taskDao.getAllTasks()
-                                            }
+                                            viewModel.toggleTask(task)
                                         },
                                         onEdit = {
                                             taskText = task.title
                                             editingTaskId = task.id
-
-
                                         },
                                         onDelete = {
-                                            scope.launch {
-                                                taskDao.deleteTask(task)
-                                                tasks = taskDao.getAllTasks()}
+                                            viewModel.deleteTask(task)
                                         }
-
                                     )
                                 }
                             }
@@ -119,32 +114,30 @@ class MainActivity : ComponentActivity() {
                         Button(
                             onClick = {
                                 if (taskText.isNotBlank()) {
-                                    scope.launch {
-                                        if (editingTaskId != null) {
-                                            val oldTask = tasks.find { it.id == editingTaskId }
-                                            if (oldTask != null) {
-                                                val updatedTask = oldTask.copy(
-                                                    title = taskText.trim()
-                                                )
-                                                taskDao.updateTask(updatedTask)
-                                            }
-                                            editingTaskId = null
-                                        } else {
-                                            val newTask = Task(
-                                                title = taskText.trim(),
-                                                isDone = false
+                                    if (editingTaskId != null) {
+                                        val oldTask = tasks.find { it.id == editingTaskId }
+
+                                        if (oldTask != null) {
+                                            val updatedTask = oldTask.copy(
+                                                title = taskText.trim()
                                             )
-                                            taskDao.createTask(newTask)
+                                            viewModel.editTask(updatedTask)
                                         }
 
-                                        tasks = taskDao.getAllTasks()
-                                        taskText = ""
+                                        editingTaskId = null
+                                    } else {
+                                        viewModel.createTask(taskText)
                                     }
+
+                                    taskText = ""
                                 }
                             },
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text(if (editingTaskId != null) "Update Task" else "Add Task")
+                            Text(
+                                if (editingTaskId != null) "Update Task"
+                                else "Add Task"
+                            )
                         }
                     }
                 }
@@ -154,11 +147,10 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun TaskHeader(tasks : List<Task>){
+fun TaskHeader(tasks: List<Task>) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
-
     ) {
         Text(
             text = "Tasks",
@@ -168,13 +160,12 @@ fun TaskHeader(tasks : List<Task>){
         Text(
             text = "Total: ${tasks.size}",
             style = MaterialTheme.typography.bodyMedium
-
         )
     }
 }
 
 @Composable
-fun TaskInput(taskText: String, onValueChange: (String)-> Unit){
+fun TaskInput(taskText: String, onValueChange: (String) -> Unit) {
     OutlinedTextField(
         value = taskText,
         onValueChange = onValueChange,
@@ -182,7 +173,6 @@ fun TaskInput(taskText: String, onValueChange: (String)-> Unit){
         modifier = Modifier.fillMaxWidth()
     )
 }
-
 
 @Composable
 fun TaskItem(
@@ -205,13 +195,18 @@ fun TaskItem(
                 text = task.title,
                 modifier = Modifier.weight(1f),
                 style = TextStyle(
-                    textDecoration = if (task.isDone)
+                    textDecoration = if (task.isDone) {
                         TextDecoration.LineThrough
-                    else TextDecoration.None
+                    } else {
+                        TextDecoration.None
+                    }
                 )
             )
 
-            Checkbox(checked = task.isDone, onCheckedChange = { onToggle() })
+            Checkbox(
+                checked = task.isDone,
+                onCheckedChange = { onToggle() }
+            )
 
             IconButton(onClick = onDelete) {
                 Icon(Icons.Default.Delete, contentDescription = "Delete")
@@ -223,6 +218,7 @@ fun TaskItem(
         }
     }
 }
+
 @Composable
 fun EmptyState(composition: LottieComposition?, progress: Float) {
     Column(
@@ -232,7 +228,7 @@ fun EmptyState(composition: LottieComposition?, progress: Float) {
     ) {
         LottieAnimation(
             composition = composition,
-            progress = progress,
+            progress = { progress },
             modifier = Modifier.size(200.dp)
         )
         Text("Add your first task")

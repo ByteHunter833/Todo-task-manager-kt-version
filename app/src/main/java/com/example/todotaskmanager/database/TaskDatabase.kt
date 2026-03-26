@@ -1,10 +1,11 @@
-package com.example.todotaskmanager
+package com.example.todotaskmanager.database
 
 import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
-
+import com.example.todotaskmanager.TaskDao
+import com.example.todotaskmanager.model.Task
 
 @Database(entities = [Task::class], version = 1)
 abstract  class  TaskDatabase: RoomDatabase(){

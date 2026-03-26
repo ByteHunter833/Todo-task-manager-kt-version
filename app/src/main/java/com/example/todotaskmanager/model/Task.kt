@@ -1,8 +1,7 @@
-package com.example.todotaskmanager
+package com.example.todotaskmanager.model
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
-
 
 @Entity(tableName = "tasks")
 data class Task(
